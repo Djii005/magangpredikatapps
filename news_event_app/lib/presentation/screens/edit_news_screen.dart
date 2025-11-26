@@ -2,27 +2,41 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../providers/news_provider.dart';
+import '../../data/models/news_model.dart';
 import '../../data/models/news_input.dart';
-import '../../utils/error_handler.dart';
-import '../widgets/session_handler.dart';
 
-class CreateNewsScreen extends StatefulWidget {
-  const CreateNewsScreen({super.key});
+class EditNewsScreen extends StatefulWidget {
+  final News news;
+
+  const EditNewsScreen({
+    super.key,
+    required this.news,
+  });
 
   @override
-  State<CreateNewsScreen> createState() => _CreateNewsScreenState();
+  State<EditNewsScreen> createState() => _EditNewsScreenState();
 }
 
-class _CreateNewsScreenState extends State<CreateNewsScreen> {
+class _EditNewsScreenState extends State<EditNewsScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _titleController = TextEditingController();
-  final _contentController = TextEditingController();
-  final _summaryController = TextEditingController();
+  late final TextEditingController _titleController;
+  late final TextEditingController _contentController;
+  late final TextEditingController _summaryController;
   final _imagePicker = ImagePicker();
   
   File? _selectedImage;
   bool _isLoading = false;
+  bool _removeExistingImage = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _titleController = TextEditingController(text: widget.news.title);
+    _contentController = TextEditingController(text: widget.news.content);
+    _summaryController = TextEditingController(text: widget.news.summary ?? '');
+  }
 
   @override
   void dispose() {
@@ -44,17 +58,24 @@ class _CreateNewsScreenState extends State<CreateNewsScreen> {
       if (pickedFile != null) {
         setState(() {
           _selectedImage = File(pickedFile.path);
+          _removeExistingImage = false;
         });
       }
     } catch (e) {
       if (!mounted) return;
-      ErrorHandler.showErrorSnackBar(context, 'Failed to pick image');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to pick image: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
   void _removeImage() {
     setState(() {
       _selectedImage = null;
+      _removeExistingImage = true;
     });
   }
 
@@ -77,12 +98,7 @@ class _CreateNewsScreenState extends State<CreateNewsScreen> {
     );
 
     final newsProvider = context.read<NewsProvider>();
-    
-    // Use session handler to handle session expiration
-    final success = await SessionHandler.execute(
-      context,
-      () => newsProvider.createNews(newsInput),
-    );
+    final success = await newsProvider.updateNews(widget.news.id, newsInput);
 
     if (!mounted) return;
 
@@ -91,19 +107,34 @@ class _CreateNewsScreenState extends State<CreateNewsScreen> {
     });
 
     if (success) {
-      ErrorHandler.showSuccessSnackBar(context, 'News created successfully');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('News updated successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
       Navigator.of(context).pop();
     } else {
-      final errorMessage = newsProvider.errorMessage ?? 'Failed to create news';
-      ErrorHandler.showErrorSnackBar(context, errorMessage);
+      final errorMessage = newsProvider.errorMessage ?? 'Failed to update news';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(errorMessage),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final hasExistingImage = widget.news.imageUrl != null && 
+                             !_removeExistingImage && 
+                             _selectedImage == null;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Create News'),
+        title: const Text('Edit News'),
         actions: [
           if (_isLoading)
             const Center(
@@ -193,7 +224,7 @@ class _CreateNewsScreenState extends State<CreateNewsScreen> {
                   const SizedBox(height: 8),
 
                   if (_selectedImage != null) ...[
-                    // Image Preview
+                    // New Image Preview
                     Stack(
                       children: [
                         ClipRRect(
@@ -219,15 +250,56 @@ class _CreateNewsScreenState extends State<CreateNewsScreen> {
                       ],
                     ),
                     const SizedBox(height: 8),
+                  ] else if (hasExistingImage) ...[
+                    // Existing Image Preview
+                    Stack(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: CachedNetworkImage(
+                            imageUrl: widget.news.imageUrl!,
+                            height: 200,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                            placeholder: (context, url) => Container(
+                              height: 200,
+                              color: Colors.grey[300],
+                              child: const Center(
+                                child: CircularProgressIndicator(),
+                              ),
+                            ),
+                            errorWidget: (context, url, error) => Container(
+                              height: 200,
+                              color: Colors.grey[300],
+                              child: const Icon(Icons.error),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          top: 8,
+                          right: 8,
+                          child: CircleAvatar(
+                            backgroundColor: Colors.red,
+                            child: IconButton(
+                              icon: const Icon(Icons.close, color: Colors.white),
+                              onPressed: _removeImage,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
                   ],
 
                   // Pick Image Button
                   OutlinedButton.icon(
                     onPressed: _isLoading ? null : _pickImage,
                     icon: const Icon(Icons.image),
-                    label: Text(_selectedImage == null 
-                        ? 'Select Image' 
-                        : 'Change Image'),
+                    label: Text(
+                      _selectedImage != null || hasExistingImage
+                          ? 'Change Image'
+                          : 'Select Image',
+                    ),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
@@ -255,7 +327,7 @@ class _CreateNewsScreenState extends State<CreateNewsScreen> {
                             ),
                           )
                         : const Text(
-                            'Create News',
+                            'Save Changes',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,

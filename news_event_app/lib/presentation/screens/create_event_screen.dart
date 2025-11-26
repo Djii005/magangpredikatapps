@@ -2,34 +2,63 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
-import '../providers/news_provider.dart';
-import '../../data/models/news_input.dart';
-import '../../utils/error_handler.dart';
-import '../widgets/session_handler.dart';
+import 'package:intl/intl.dart';
+import '../providers/event_provider.dart';
+import '../../data/models/event_input.dart';
 
-class CreateNewsScreen extends StatefulWidget {
-  const CreateNewsScreen({super.key});
+class CreateEventScreen extends StatefulWidget {
+  const CreateEventScreen({super.key});
 
   @override
-  State<CreateNewsScreen> createState() => _CreateNewsScreenState();
+  State<CreateEventScreen> createState() => _CreateEventScreenState();
 }
 
-class _CreateNewsScreenState extends State<CreateNewsScreen> {
+class _CreateEventScreenState extends State<CreateEventScreen> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
-  final _contentController = TextEditingController();
-  final _summaryController = TextEditingController();
+  final _descriptionController = TextEditingController();
+  final _locationController = TextEditingController();
   final _imagePicker = ImagePicker();
   
+  DateTime? _selectedDate;
+  TimeOfDay? _selectedTime;
   File? _selectedImage;
   bool _isLoading = false;
 
   @override
   void dispose() {
     _titleController.dispose();
-    _contentController.dispose();
-    _summaryController.dispose();
+    _descriptionController.dispose();
+    _locationController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickDate() async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
+    );
+
+    if (picked != null) {
+      setState(() {
+        _selectedDate = picked;
+      });
+    }
+  }
+
+  Future<void> _pickTime() async {
+    final TimeOfDay? picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.now(),
+    );
+
+    if (picked != null) {
+      setState(() {
+        _selectedTime = picked;
+      });
+    }
   }
 
   Future<void> _pickImage() async {
@@ -48,7 +77,12 @@ class _CreateNewsScreenState extends State<CreateNewsScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      ErrorHandler.showErrorSnackBar(context, 'Failed to pick image');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to pick image: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -58,8 +92,36 @@ class _CreateNewsScreenState extends State<CreateNewsScreen> {
     });
   }
 
+  String? _validateDate(DateTime? date) {
+    if (date == null) {
+      return 'Please select an event date';
+    }
+    
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final selectedDay = DateTime(date.year, date.month, date.day);
+    
+    if (selectedDay.isBefore(today)) {
+      return 'Event date cannot be in the past';
+    }
+    
+    return null;
+  }
+
   Future<void> _handleSave() async {
     if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    // Validate date separately
+    final dateError = _validateDate(_selectedDate);
+    if (dateError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(dateError),
+          backgroundColor: Colors.red,
+        ),
+      );
       return;
     }
 
@@ -67,22 +129,17 @@ class _CreateNewsScreenState extends State<CreateNewsScreen> {
       _isLoading = true;
     });
 
-    final newsInput = NewsInput(
+    final eventInput = EventInput(
       title: _titleController.text.trim(),
-      content: _contentController.text.trim(),
-      summary: _summaryController.text.trim().isEmpty 
-          ? null 
-          : _summaryController.text.trim(),
+      description: _descriptionController.text.trim(),
+      eventDate: _selectedDate!,
+      eventTime: _selectedTime?.format(context),
+      location: _locationController.text.trim(),
       image: _selectedImage,
     );
 
-    final newsProvider = context.read<NewsProvider>();
-    
-    // Use session handler to handle session expiration
-    final success = await SessionHandler.execute(
-      context,
-      () => newsProvider.createNews(newsInput),
-    );
+    final eventProvider = context.read<EventProvider>();
+    final success = await eventProvider.createEvent(eventInput);
 
     if (!mounted) return;
 
@@ -91,11 +148,22 @@ class _CreateNewsScreenState extends State<CreateNewsScreen> {
     });
 
     if (success) {
-      ErrorHandler.showSuccessSnackBar(context, 'News created successfully');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Event created successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
       Navigator.of(context).pop();
     } else {
-      final errorMessage = newsProvider.errorMessage ?? 'Failed to create news';
-      ErrorHandler.showErrorSnackBar(context, errorMessage);
+      final errorMessage = eventProvider.errorMessage ?? 'Failed to create event';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(errorMessage),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
     }
   }
 
@@ -103,7 +171,7 @@ class _CreateNewsScreenState extends State<CreateNewsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Create News'),
+        title: const Text('Create Event'),
         actions: [
           if (_isLoading)
             const Center(
@@ -135,7 +203,7 @@ class _CreateNewsScreenState extends State<CreateNewsScreen> {
                     controller: _titleController,
                     decoration: const InputDecoration(
                       labelText: 'Title *',
-                      hintText: 'Enter news title',
+                      hintText: 'Enter event title',
                       border: OutlineInputBorder(),
                       prefixIcon: Icon(Icons.title),
                     ),
@@ -149,34 +217,88 @@ class _CreateNewsScreenState extends State<CreateNewsScreen> {
                   ),
                   const SizedBox(height: 16),
 
-                  // Summary Field
+                  // Description Field
                   TextFormField(
-                    controller: _summaryController,
+                    controller: _descriptionController,
                     decoration: const InputDecoration(
-                      labelText: 'Summary',
-                      hintText: 'Enter a brief summary (optional)',
+                      labelText: 'Description *',
+                      hintText: 'Enter event description',
                       border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.short_text),
+                      prefixIcon: Icon(Icons.description),
+                      alignLabelWithHint: true,
                     ),
-                    maxLines: 3,
-                    maxLength: 300,
+                    maxLines: 5,
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Please enter a description';
+                      }
+                      return null;
+                    },
                   ),
                   const SizedBox(height: 16),
 
-                  // Content Field
-                  TextFormField(
-                    controller: _contentController,
-                    decoration: const InputDecoration(
-                      labelText: 'Content *',
-                      hintText: 'Enter news content',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.article),
-                      alignLabelWithHint: true,
+                  // Date Picker
+                  InkWell(
+                    onTap: _isLoading ? null : _pickDate,
+                    child: InputDecorator(
+                      decoration: InputDecoration(
+                        labelText: 'Event Date *',
+                        border: const OutlineInputBorder(),
+                        prefixIcon: const Icon(Icons.calendar_today),
+                        errorText: _selectedDate == null && _formKey.currentState?.validate() == false
+                            ? 'Please select a date'
+                            : null,
+                      ),
+                      child: Text(
+                        _selectedDate != null
+                            ? DateFormat('EEEE, MMMM d, yyyy').format(_selectedDate!)
+                            : 'Select date',
+                        style: TextStyle(
+                          color: _selectedDate != null 
+                              ? (Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black)
+                              : Theme.of(context).hintColor,
+                        ),
+                      ),
                     ),
-                    maxLines: 10,
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Time Picker
+                  InkWell(
+                    onTap: _isLoading ? null : _pickTime,
+                    child: InputDecorator(
+                      decoration: const InputDecoration(
+                        labelText: 'Event Time (Optional)',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.access_time),
+                      ),
+                      child: Text(
+                        _selectedTime != null
+                            ? _selectedTime!.format(context)
+                            : 'Select time',
+                        style: TextStyle(
+                          color: _selectedTime != null 
+                              ? Theme.of(context).textTheme.bodyLarge?.color
+                              : Theme.of(context).hintColor,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Location Field
+                  TextFormField(
+                    controller: _locationController,
+                    decoration: const InputDecoration(
+                      labelText: 'Location *',
+                      hintText: 'Enter event location',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.location_on),
+                    ),
+                    maxLength: 200,
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
-                        return 'Please enter content';
+                        return 'Please enter a location';
                       }
                       return null;
                     },
@@ -255,7 +377,7 @@ class _CreateNewsScreenState extends State<CreateNewsScreen> {
                             ),
                           )
                         : const Text(
-                            'Create News',
+                            'Create Event',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,

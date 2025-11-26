@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import 'register_screen.dart';
 import 'main_app_screen.dart';
+import '../../utils/error_handler.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -46,15 +47,9 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       );
     } else {
-      // Show error message
+      // Show error message using error handler
       final errorMessage = authProvider.errorMessage ?? 'Login failed';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(errorMessage),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 3),
-        ),
-      );
+      ErrorHandler.showErrorSnackBar(context, errorMessage);
     }
   }
 

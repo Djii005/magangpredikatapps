@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import '../../data/models/news_model.dart';
 import '../../data/models/news_input.dart';
 import '../../data/repositories/news_repository.dart';
+import '../../data/exceptions/app_exceptions.dart';
+import '../../utils/app_logger.dart';
 
 class NewsProvider extends ChangeNotifier {
   final NewsRepository _newsRepository;
@@ -89,8 +91,14 @@ class NewsProvider extends ChangeNotifier {
         _setLoading(false);
         return false;
       }
-    } catch (e) {
-      _setError('An unexpected error occurred: $e');
+    } on SessionExpiredException catch (e) {
+      AppLogger.warning('Session expired during create news');
+      _setError(e.message);
+      _setLoading(false);
+      rethrow; // Re-throw to be handled by UI
+    } catch (e, stackTrace) {
+      AppLogger.error('Error creating news', e, stackTrace);
+      _setError('An unexpected error occurred. Please try again.');
       _setLoading(false);
       return false;
     }
@@ -113,8 +121,14 @@ class NewsProvider extends ChangeNotifier {
         _setLoading(false);
         return false;
       }
-    } catch (e) {
-      _setError('An unexpected error occurred: $e');
+    } on SessionExpiredException catch (e) {
+      AppLogger.warning('Session expired during update news');
+      _setError(e.message);
+      _setLoading(false);
+      rethrow; // Re-throw to be handled by UI
+    } catch (e, stackTrace) {
+      AppLogger.error('Error updating news', e, stackTrace);
+      _setError('An unexpected error occurred. Please try again.');
       _setLoading(false);
       return false;
     }
@@ -137,8 +151,14 @@ class NewsProvider extends ChangeNotifier {
         _setLoading(false);
         return false;
       }
-    } catch (e) {
-      _setError('An unexpected error occurred: $e');
+    } on SessionExpiredException catch (e) {
+      AppLogger.warning('Session expired during delete news');
+      _setError(e.message);
+      _setLoading(false);
+      rethrow; // Re-throw to be handled by UI
+    } catch (e, stackTrace) {
+      AppLogger.error('Error deleting news', e, stackTrace);
+      _setError('An unexpected error occurred. Please try again.');
       _setLoading(false);
       return false;
     }

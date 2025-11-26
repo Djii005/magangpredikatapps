@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import '../../data/models/user_model.dart';
 import '../../data/models/user_role.dart';
 import '../../data/repositories/auth_repository.dart';
+import '../../data/exceptions/app_exceptions.dart';
+import '../../utils/app_logger.dart';
 
 class AuthProvider extends ChangeNotifier {
   final AuthRepository _authRepository;
@@ -111,16 +113,40 @@ class AuthProvider extends ChangeNotifier {
       
       if (user != null) {
         _currentUser = user;
+        AppLogger.info('Auth state restored for user: ${user.email}');
       } else {
         _currentUser = null;
+        AppLogger.debug('No authenticated user found');
       }
       
       _setLoading(false);
       notifyListeners();
-    } catch (e) {
-      _setError('Failed to check authentication state: $e');
+    } on SessionExpiredException catch (e) {
+      AppLogger.warning('Session expired during auth check');
+      _setError(e.message);
       _currentUser = null;
       _setLoading(false);
+      // Clear stored session
+      await _authRepository.signOut();
+    } catch (e, stackTrace) {
+      AppLogger.error('Error checking auth state', e, stackTrace);
+      _setError('Failed to check authentication state');
+      _currentUser = null;
+      _setLoading(false);
+    }
+  }
+
+  // Handle session expiration - to be called from repositories
+  Future<void> handleSessionExpired() async {
+    AppLogger.warning('Handling session expiration');
+    _currentUser = null;
+    _setError('Your session has expired. Please log in again.');
+    notifyListeners();
+    
+    try {
+      await _authRepository.signOut();
+    } catch (e) {
+      AppLogger.error('Error during session expiration cleanup', e);
     }
   }
 

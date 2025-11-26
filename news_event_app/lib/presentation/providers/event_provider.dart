@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import '../../data/models/event_model.dart';
 import '../../data/models/event_input.dart';
 import '../../data/repositories/event_repository.dart';
+import '../../data/exceptions/app_exceptions.dart';
+import '../../utils/app_logger.dart';
 
 class EventProvider extends ChangeNotifier {
   final EventRepository _eventRepository;
@@ -89,8 +91,14 @@ class EventProvider extends ChangeNotifier {
         _setLoading(false);
         return false;
       }
-    } catch (e) {
-      _setError('An unexpected error occurred: $e');
+    } on SessionExpiredException catch (e) {
+      AppLogger.warning('Session expired during create event');
+      _setError(e.message);
+      _setLoading(false);
+      rethrow; // Re-throw to be handled by UI
+    } catch (e, stackTrace) {
+      AppLogger.error('Error creating event', e, stackTrace);
+      _setError('An unexpected error occurred. Please try again.');
       _setLoading(false);
       return false;
     }
@@ -113,8 +121,14 @@ class EventProvider extends ChangeNotifier {
         _setLoading(false);
         return false;
       }
-    } catch (e) {
-      _setError('An unexpected error occurred: $e');
+    } on SessionExpiredException catch (e) {
+      AppLogger.warning('Session expired during update event');
+      _setError(e.message);
+      _setLoading(false);
+      rethrow; // Re-throw to be handled by UI
+    } catch (e, stackTrace) {
+      AppLogger.error('Error updating event', e, stackTrace);
+      _setError('An unexpected error occurred. Please try again.');
       _setLoading(false);
       return false;
     }
@@ -137,8 +151,14 @@ class EventProvider extends ChangeNotifier {
         _setLoading(false);
         return false;
       }
-    } catch (e) {
-      _setError('An unexpected error occurred: $e');
+    } on SessionExpiredException catch (e) {
+      AppLogger.warning('Session expired during delete event');
+      _setError(e.message);
+      _setLoading(false);
+      rethrow; // Re-throw to be handled by UI
+    } catch (e, stackTrace) {
+      AppLogger.error('Error deleting event', e, stackTrace);
+      _setError('An unexpected error occurred. Please try again.');
       _setLoading(false);
       return false;
     }

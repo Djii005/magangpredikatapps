@@ -3,6 +3,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/event_model.dart';
 import '../models/event_input.dart';
 import '../models/result.dart';
+import '../../utils/app_logger.dart';
+import '../exceptions/app_exceptions.dart';
 
 class EventRepository {
   final SupabaseClient _supabaseClient;
@@ -20,6 +22,7 @@ class EventRepository {
     int offset = 0,
   }) async {
     try {
+      AppLogger.debug('Fetching events: limit=$limit, offset=$offset');
       final response = await _supabaseClient
           .from(_tableName)
           .select()
@@ -30,11 +33,17 @@ class EventRepository {
           .map((json) => Event.fromJson(json as Map<String, dynamic>))
           .toList();
 
+      AppLogger.info('Successfully fetched ${eventsList.length} events');
       return Result.success(eventsList);
-    } on PostgrestException catch (e) {
-      return Result.failure('Failed to fetch events: ${e.message}');
-    } catch (e) {
-      return Result.failure('Network error: $e');
+    } on PostgrestException catch (e, stackTrace) {
+      AppLogger.error('Database exception fetching events', e, stackTrace);
+      return Result.failure('Failed to fetch events. Please try again.');
+    } on SocketException catch (e, stackTrace) {
+      AppLogger.error('Network error fetching events', e, stackTrace);
+      return Result.failure('No internet connection. Please check your network.');
+    } catch (e, stackTrace) {
+      AppLogger.error('Unexpected error fetching events', e, stackTrace);
+      return Result.failure('An unexpected error occurred. Please try again.');
     }
   }
 
@@ -43,6 +52,7 @@ class EventRepository {
     int limit = 20,
   }) async {
     try {
+      AppLogger.debug('Fetching upcoming events: limit=$limit');
       final now = DateTime.now().toIso8601String();
       
       final response = await _supabaseClient
@@ -56,17 +66,24 @@ class EventRepository {
           .map((json) => Event.fromJson(json as Map<String, dynamic>))
           .toList();
 
+      AppLogger.info('Successfully fetched ${eventsList.length} upcoming events');
       return Result.success(eventsList);
-    } on PostgrestException catch (e) {
-      return Result.failure('Failed to fetch upcoming events: ${e.message}');
-    } catch (e) {
-      return Result.failure('Network error: $e');
+    } on PostgrestException catch (e, stackTrace) {
+      AppLogger.error('Database exception fetching upcoming events', e, stackTrace);
+      return Result.failure('Failed to fetch upcoming events. Please try again.');
+    } on SocketException catch (e, stackTrace) {
+      AppLogger.error('Network error fetching upcoming events', e, stackTrace);
+      return Result.failure('No internet connection. Please check your network.');
+    } catch (e, stackTrace) {
+      AppLogger.error('Unexpected error fetching upcoming events', e, stackTrace);
+      return Result.failure('An unexpected error occurred. Please try again.');
     }
   }
 
   // Get single event by ID
   Future<Result<Event>> getEventById(String id) async {
     try {
+      AppLogger.debug('Fetching event by ID: $id');
       final response = await _supabaseClient
           .from(_tableName)
           .select()
@@ -74,35 +91,47 @@ class EventRepository {
           .single();
 
       final event = Event.fromJson(response);
+      AppLogger.debug('Successfully fetched event: ${event.title}');
       return Result.success(event);
-    } on PostgrestException catch (e) {
+    } on PostgrestException catch (e, stackTrace) {
       if (e.code == 'PGRST116') {
+        AppLogger.warning('Event not found: $id');
         return Result.failure('Event not found');
       }
-      return Result.failure('Failed to fetch event: ${e.message}');
-    } catch (e) {
-      return Result.failure('Network error: $e');
+      AppLogger.error('Database exception fetching event by ID', e, stackTrace);
+      return Result.failure('Failed to fetch event. Please try again.');
+    } on SocketException catch (e, stackTrace) {
+      AppLogger.error('Network error fetching event by ID', e, stackTrace);
+      return Result.failure('No internet connection. Please check your network.');
+    } catch (e, stackTrace) {
+      AppLogger.error('Unexpected error fetching event by ID', e, stackTrace);
+      return Result.failure('An unexpected error occurred. Please try again.');
     }
   }
 
   // Create event with validation
   Future<Result<Event>> createEvent(EventInput input) async {
     try {
+      AppLogger.info('Creating event: ${input.title}');
+      
       // Check if user is authenticated
       final user = _supabaseClient.auth.currentUser;
       if (user == null) {
-        return Result.failure('User not authenticated');
+        AppLogger.warning('Create event failed: User not authenticated');
+        throw SessionExpiredException();
       }
 
       // Validate event date is not in the past
       final now = DateTime.now();
       if (input.eventDate.isBefore(now)) {
+        AppLogger.warning('Create event failed: Event date in the past');
         return Result.failure('Event date cannot be in the past');
       }
 
       // Upload image if provided
       String? imageUrl;
       if (input.image != null) {
+        AppLogger.debug('Uploading image for event');
         final uploadResult = await uploadImage(input.image!);
         if (uploadResult.isFailure) {
           return Result.failure(uploadResult.error!);
@@ -129,27 +158,40 @@ class EventRepository {
           .single();
 
       final event = Event.fromJson(response);
+      AppLogger.info('Event created successfully: ${event.id}');
       return Result.success(event);
-    } on PostgrestException catch (e) {
+    } on SessionExpiredException {
+      rethrow;
+    } on SocketException catch (e, stackTrace) {
+      AppLogger.error('Network error creating event', e, stackTrace);
+      return Result.failure('No internet connection. Please check your network.');
+    } on StorageException catch (e, stackTrace) {
+      AppLogger.error('Storage exception creating event', e, stackTrace);
+      return Result.failure('Failed to upload image. Please try again.');
+    } on PostgrestException catch (e, stackTrace) {
       // Check for authorization errors
       if (e.code == '42501' || e.message.contains('permission denied')) {
-        return Result.failure('Insufficient permissions to create event');
+        AppLogger.warning('Create event failed: Insufficient permissions');
+        return Result.failure('You do not have permission to create events');
       }
-      return Result.failure('Failed to create event: ${e.message}');
-    } on StorageException catch (e) {
-      return Result.failure('Failed to upload image: ${e.message}');
-    } catch (e) {
-      return Result.failure('Network error: $e');
+      AppLogger.error('Database exception creating event', e, stackTrace);
+      return Result.failure('Failed to create event. Please try again.');
+    } catch (e, stackTrace) {
+      AppLogger.error('Unexpected error creating event', e, stackTrace);
+      return Result.failure('An unexpected error occurred. Please try again.');
     }
   }
 
   // Update event
   Future<Result<Event>> updateEvent(String id, EventInput input) async {
     try {
+      AppLogger.info('Updating event: $id');
+      
       // Check if user is authenticated
       final user = _supabaseClient.auth.currentUser;
       if (user == null) {
-        return Result.failure('User not authenticated');
+        AppLogger.warning('Update event failed: User not authenticated');
+        throw SessionExpiredException();
       }
 
       // Get existing event to check for old image
@@ -162,6 +204,7 @@ class EventRepository {
       // Handle image replacement
       String? imageUrl = existingEvent.imageUrl;
       if (input.image != null) {
+        AppLogger.debug('Uploading new image for event');
         // Upload new image
         final uploadResult = await uploadImage(input.image!);
         if (uploadResult.isFailure) {
@@ -195,30 +238,44 @@ class EventRepository {
           .single();
 
       final event = Event.fromJson(response);
+      AppLogger.info('Event updated successfully: $id');
       return Result.success(event);
-    } on PostgrestException catch (e) {
+    } on SessionExpiredException {
+      rethrow;
+    } on SocketException catch (e, stackTrace) {
+      AppLogger.error('Network error updating event', e, stackTrace);
+      return Result.failure('No internet connection. Please check your network.');
+    } on StorageException catch (e, stackTrace) {
+      AppLogger.error('Storage exception updating event', e, stackTrace);
+      return Result.failure('Failed to upload image. Please try again.');
+    } on PostgrestException catch (e, stackTrace) {
       // Check for authorization errors
       if (e.code == '42501' || e.message.contains('permission denied')) {
-        return Result.failure('Insufficient permissions to update event');
+        AppLogger.warning('Update event failed: Insufficient permissions');
+        return Result.failure('You do not have permission to update events');
       }
       if (e.code == 'PGRST116') {
+        AppLogger.warning('Update event failed: Event not found');
         return Result.failure('Event not found');
       }
-      return Result.failure('Failed to update event: ${e.message}');
-    } on StorageException catch (e) {
-      return Result.failure('Failed to upload image: ${e.message}');
-    } catch (e) {
-      return Result.failure('Network error: $e');
+      AppLogger.error('Database exception updating event', e, stackTrace);
+      return Result.failure('Failed to update event. Please try again.');
+    } catch (e, stackTrace) {
+      AppLogger.error('Unexpected error updating event', e, stackTrace);
+      return Result.failure('An unexpected error occurred. Please try again.');
     }
   }
 
   // Delete event
   Future<Result<void>> deleteEvent(String id) async {
     try {
+      AppLogger.info('Deleting event: $id');
+      
       // Check if user is authenticated
       final user = _supabaseClient.auth.currentUser;
       if (user == null) {
-        return Result.failure('User not authenticated');
+        AppLogger.warning('Delete event failed: User not authenticated');
+        throw SessionExpiredException();
       }
 
       // Get existing event to delete associated image
@@ -233,35 +290,49 @@ class EventRepository {
           .delete()
           .eq('id', id);
 
+      AppLogger.info('Event deleted successfully: $id');
       return Result.success(null);
-    } on PostgrestException catch (e) {
+    } on SessionExpiredException {
+      rethrow;
+    } on SocketException catch (e, stackTrace) {
+      AppLogger.error('Network error deleting event', e, stackTrace);
+      return Result.failure('No internet connection. Please check your network.');
+    } on PostgrestException catch (e, stackTrace) {
       // Check for authorization errors
       if (e.code == '42501' || e.message.contains('permission denied')) {
-        return Result.failure('Insufficient permissions to delete event');
+        AppLogger.warning('Delete event failed: Insufficient permissions');
+        return Result.failure('You do not have permission to delete events');
       }
-      return Result.failure('Failed to delete event: ${e.message}');
-    } catch (e) {
-      return Result.failure('Network error: $e');
+      AppLogger.error('Database exception deleting event', e, stackTrace);
+      return Result.failure('Failed to delete event. Please try again.');
+    } catch (e, stackTrace) {
+      AppLogger.error('Unexpected error deleting event', e, stackTrace);
+      return Result.failure('An unexpected error occurred. Please try again.');
     }
   }
 
   // Upload image to Supabase storage
   Future<Result<String>> uploadImage(File image) async {
     try {
+      AppLogger.debug('Uploading image: ${image.path}');
+      
       // Validate file exists
       if (!await image.exists()) {
+        AppLogger.warning('Upload failed: Image file does not exist');
         return Result.failure('Image file does not exist');
       }
 
       // Validate file size (max 5MB)
       final fileSize = await image.length();
       if (fileSize > 5 * 1024 * 1024) {
+        AppLogger.warning('Upload failed: Image size exceeds limit (${fileSize / 1024 / 1024} MB)');
         return Result.failure('Image size exceeds 5MB limit');
       }
 
       // Validate file type
       final extension = image.path.split('.').last.toLowerCase();
       if (!['jpg', 'jpeg', 'png', 'webp'].contains(extension)) {
+        AppLogger.warning('Upload failed: Invalid image format ($extension)');
         return Result.failure('Invalid image format. Only JPG, PNG, and WebP are allowed');
       }
 
@@ -281,20 +352,28 @@ class EventRepository {
           .from(_bucketName)
           .getPublicUrl(filePath);
 
+      AppLogger.info('Image uploaded successfully: $filePath');
       return Result.success(imageUrl);
-    } on StorageException catch (e) {
+    } on SocketException catch (e, stackTrace) {
+      AppLogger.error('Network error uploading image', e, stackTrace);
+      return Result.failure('No internet connection. Please check your network.');
+    } on StorageException catch (e, stackTrace) {
       if (e.message.contains('row-level security')) {
-        return Result.failure('Insufficient permissions to upload image');
+        AppLogger.warning('Upload failed: Insufficient permissions');
+        return Result.failure('You do not have permission to upload images');
       }
-      return Result.failure('Failed to upload image: ${e.message}');
-    } catch (e) {
-      return Result.failure('Failed to upload image: $e');
+      AppLogger.error('Storage exception uploading image', e, stackTrace);
+      return Result.failure('Failed to upload image. Please try again.');
+    } catch (e, stackTrace) {
+      AppLogger.error('Unexpected error uploading image', e, stackTrace);
+      return Result.failure('Failed to upload image. Please try again.');
     }
   }
 
   // Helper method to delete image from storage using URL
   Future<void> _deleteImageFromUrl(String imageUrl) async {
     try {
+      AppLogger.debug('Deleting image from storage: $imageUrl');
       // Extract file path from URL
       final uri = Uri.parse(imageUrl);
       final pathSegments = uri.pathSegments;
@@ -308,12 +387,12 @@ class EventRepository {
         await _supabaseClient.storage
             .from(_bucketName)
             .remove([filePath]);
+        
+        AppLogger.debug('Image deleted successfully from storage');
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
       // Log error but don't throw - deletion failure shouldn't block the main operation
-      // In production, use a proper logging framework
-      // ignore: avoid_print
-      print('Warning: Failed to delete old image: $e');
+      AppLogger.warning('Failed to delete old image from storage', e, stackTrace);
     }
   }
 }

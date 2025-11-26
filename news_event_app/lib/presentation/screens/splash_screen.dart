@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import 'login_screen.dart';
 import 'main_app_screen.dart';
+import '../../utils/error_handler.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -40,6 +41,16 @@ class _SplashScreenState extends State<SplashScreen> {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const LoginScreen()),
       );
+      
+      // Show error message if session expired
+      if (authProvider.errorMessage != null) {
+        // Delay to ensure navigation is complete
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted) {
+            ErrorHandler.showErrorSnackBar(context, authProvider.errorMessage!);
+          }
+        });
+      }
     }
   }
 
